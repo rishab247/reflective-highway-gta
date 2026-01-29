@@ -506,10 +506,86 @@ public class SceneSetup : MonoBehaviour
         GameObject tl = GameObject.CreatePrimitive(PrimitiveType.Quad); tl.transform.SetParent(playerCar); tl.transform.localPosition = pos; tl.transform.localRotation = Quaternion.Euler(0,180,0); tl.transform.localScale = new Vector3(0.5f, 0.2f, 1f); tl.GetComponent<Renderer>().material = tailLightMat;
     }
     void SetupCamera() {
-        GameObject camObj = GameObject.FindWithTag("MainCamera"); if (camObj == null) { camObj = new GameObject("Main Camera"); camObj.AddComponent<Camera>(); camObj.tag = "MainCamera"; }
-        mainCamera = camObj.transform; Camera cam = camObj.GetComponent<Camera>(); cam.clearFlags = CameraClearFlags.Skybox; cam.farClipPlane = 1500f; cam.allowHDR = true;
+        GameObject camObj = GameObject.FindWithTag("MainCamera"); 
+        if (camObj == null) { 
+            camObj = new GameObject("Main Camera"); 
+            camObj.AddComponent<Camera>(); 
+            camObj.tag = "MainCamera"; 
+        }
+        // ESSENTIAL: Add AudioListener for sound!
+        if (camObj.GetComponent<AudioListener>() == null) {
+            camObj.AddComponent<AudioListener>();
+        }
+
+        mainCamera = camObj.transform; 
+        Camera cam = camObj.GetComponent<Camera>(); 
+        cam.clearFlags = CameraClearFlags.Skybox; 
+        cam.farClipPlane = 1500f; 
+        cam.allowHDR = true;
         if (camObj.GetComponent<SimpleBloomEffect>() == null) camObj.AddComponent<SimpleBloomEffect>();
     }
+    
+    // --- ON SCREEN CONTROLS ---
+    
+    void OnGUI()
+    {
+        // Scale UI to be visible on high-DPI screens
+        // Base resolution reference: 1920x1080
+        float scaleX = Screen.width / 1920f;
+        float scaleY = Screen.height / 1080f;
+        float scale = Mathf.Max(scaleX, scaleY); // Use largest scale to keep items readable
+        GUI.matrix = Matrix4x4.TRS(Vector3.zero, Quaternion.identity, new Vector3(scale, scale, 1));
+
+        GUIStyle style = new GUIStyle();
+        style.fontSize = 60; // Bigger font
+        style.normal.textColor = Color.cyan; 
+        style.fontStyle = FontStyle.Bold;
+        
+        // Adjust coordinates for the scaled matrix
+        // We act as if screen is 1920x1080 (approx)
+        
+        if (!isGameOver) {
+            GUI.Label(new Rect(50, 50, 800, 100), "DIST: " + (int)distanceTraveled + "m", style);
+            GUI.Label(new Rect(50, 150, 800, 100), "SCORE: " + score, style);
+            if (isNitro) {
+                style.normal.textColor = Color.yellow;
+                GUI.Label(new Rect(1920/2 - 150, 300, 300, 150), "NITRO!", style);
+            }
+            
+            // CONTROLS
+            GUIStyle btnStyle = new GUIStyle(GUI.skin.button);
+            btnStyle.fontSize = 120; // Huge arrows
+            
+            // Left Button
+            // Bottom Left
+            if (GUI.RepeatButton(new Rect(50, 1080 - 400, 300, 300), "<", btnStyle)) {
+                steerInput = -1f;
+            }
+            // Right Button
+            // Bottom Right (Screen width relative to scale is roughly 1920)
+            // But we must use Screen.width / scale to be precise? 
+            // Simplification: Use fixed large coordinates that usually fit landscape
+            if (GUI.RepeatButton(new Rect(1920 - 350, 1080 - 400, 300, 300), ">", btnStyle)) {
+                steerInput = 1f;
+            }
+            
+        } else {
+            style.fontSize = 150; style.normal.textColor = Color.red;
+            GUI.Label(new Rect(1920/2 - 400, 1080/2 - 200, 800, 300), "GAME OVER", style);
+            
+            GUIStyle btnStyle = new GUIStyle(GUI.skin.button);
+            btnStyle.fontSize = 80;
+            if (GUI.Button(new Rect(1920/2 - 250, 1080/2 + 100, 500, 200), "RESTART", btnStyle)) {
+                UnityEngine.SceneManagement.SceneManager.LoadScene(UnityEngine.SceneManagement.SceneManager.GetActiveScene().name);
+            }
+        }
+        
+        if (errorMessage != "None") {
+            style.fontSize = 40; style.normal.textColor = Color.red;
+            GUI.Label(new Rect(50, 1080-300, 1800, 300), errorMessage, style);
+        }
+    }
+
     void SetupLighting() {
         RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Trilight; RenderSettings.ambientSkyColor = new Color(0.02f, 0.02f, 0.1f); RenderSettings.ambientGroundColor = Color.black; RenderSettings.fog = true; RenderSettings.fogDensity = 0.003f;
     }
@@ -519,47 +595,5 @@ public class SceneSetup : MonoBehaviour
     }
     private Shader SafeShader(string name) {
         Shader s = Shader.Find(name); if (s == null) s = Shader.Find("Standard"); return s;
-    }
-    
-    // --- ON SCREEN CONTROLS ---
-    
-    void OnGUI()
-    {
-        GUIStyle style = new GUIStyle();
-        style.fontSize = 40; style.normal.textColor = Color.cyan; style.fontStyle = FontStyle.Bold;
-        
-        if (!isGameOver) {
-            GUI.Label(new Rect(50, 50, 500, 100), "DIST: " + (int)distanceTraveled + "m", style);
-            GUI.Label(new Rect(50, 100, 500, 100), "SCORE: " + score, style);
-            if (isNitro) {
-                style.normal.textColor = Color.yellow;
-                GUI.Label(new Rect(Screen.width/2 - 100, 150, 200, 100), "NITRO!", style);
-            }
-            
-            // CONTROLS
-            GUIStyle btnStyle = new GUIStyle(GUI.skin.button);
-            btnStyle.fontSize = 60;
-            
-            // Left Button
-            if (GUI.RepeatButton(new Rect(50, Screen.height - 300, 200, 200), "<", btnStyle)) {
-                steerInput = -1f;
-            }
-            // Right Button
-            if (GUI.RepeatButton(new Rect(Screen.width - 250, Screen.height - 300, 200, 200), ">", btnStyle)) {
-                steerInput = 1f;
-            }
-            
-        } else {
-            style.fontSize = 80; style.normal.textColor = Color.red;
-            GUI.Label(new Rect(Screen.width/2 - 200, Screen.height/2 - 100, 500, 200), "GAME OVER", style);
-            if (GUI.Button(new Rect(Screen.width/2 - 200, Screen.height/2 + 50, 400, 100), "RESTART")) {
-                UnityEngine.SceneManagement.SceneManager.LoadScene(UnityEngine.SceneManagement.SceneManager.GetActiveScene().name);
-            }
-        }
-        
-        if (errorMessage != "None") {
-            style.fontSize = 20; style.normal.textColor = Color.red;
-            GUI.Label(new Rect(20, Screen.height-200, Screen.width, 200), errorMessage, style);
-        }
     }
 }
