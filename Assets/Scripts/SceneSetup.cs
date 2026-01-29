@@ -5,11 +5,27 @@ using System.Collections.Generic;
 public class SceneSetup : MonoBehaviour
 {
     private string errorMessage = "None";
-    private Transform cameraOrbitRoot;
     private Transform mainCamera;
     private Transform playerSphere;
-    private float orbitAngle = 0f;
-    private Vector2 lastMousePos;
+    
+    // Endless Logic
+    public float speed = 80f; // High speed driving
+    private float currentZ = 0f;
+    private float spawnZ = -100f; // Start generating from here
+    private float segmentLength = 100f;
+    private int initialSegments = 15;
+    private List<GameObject> activeSegments = new List<GameObject>();
+    private Transform environmentRoot;
+
+    // Materials (Cached)
+    private Material roadMat;
+    private Material buildingMat;
+    private Material windowMat;
+    private Material lampMat;
+    private Material lampEmissive;
+    private Material railMat;
+    private Texture2D windowTex;
+    private Texture2D roadTex;
 
     void Awake()
     {
@@ -21,68 +37,309 @@ public class SceneSetup : MonoBehaviour
         if (type == LogType.Error || type == LogType.Exception)
         {
             errorMessage = logString + "\n" + stackTrace;
-            try { GUIUtility.systemCopyBuffer = "ERROR: " + logString + "\nSTACK: " + stackTrace; } catch {}
         }
     }
 
     void Start()
     {
         try {
-            SetupLighting(); // Basic lighting first
-            SetupPostProcessing(); // Cinematic Overrides
+            // Setup Environment Roots
+            environmentRoot = new GameObject("Environment").transform;
+            
+            // visual setup
+            SetupLighting();
+            SetupPostProcessing();
+            CreateSky();
+
+            // Prepare Materials
+            PrepareMaterials();
+            
+            // Player Setup
             CreateReflectiveSphere();
             SetupCamera();
-            CreateSky();
-            // CreateCityscape(); // REMOVED: User wants real buildings
-            CreateCityBuildings(); // NEW: Real 3D buildings
-            CreateHighway();
-            CreateStreetLamps(); // New: Procedural Lamps
-            CreateGuardRails(); // New: Procedural Rails
+            CreateReflectionProbe();
+
+            // Initial Generation
+            for (int i = 0; i < initialSegments; i++)
+            {
+                SpawnWorldSegment();
+            }
+
         } catch (System.Exception e) {
-            string fullErr = "CATCH: " + e.Message + "\n" + e.StackTrace;
-            errorMessage = fullErr;
+            errorMessage = e.Message + "\n" + e.StackTrace;
             Debug.LogError(e);
-            try { GUIUtility.systemCopyBuffer = fullErr; } catch {}
         }
+    }
+
+    void PrepareMaterials()
+    {
+        // Road
+        roadMat = Resources.Load<Material>("Materials/HighwayMaterial");
+        roadTex = Resources.Load<Texture2D>("Textures/HighwayTex");
+        if (roadMat == null) {
+            roadMat = new Material(SafeShader("Standard"));
+            roadMat.EnableKeyword("_NORMALMAP");
+            roadMat.SetFloat("_Glossiness", 0.9f); // Wet
+            roadMat.SetFloat("_Metallic", 0.0f);
+            roadMat.SetColor("_Color", new Color(0.2f, 0.2f, 0.2f));
+        }
+        if (roadTex != null) {
+            roadMat.mainTexture = roadTex;
+            roadTex.wrapMode = TextureWrapMode.Repeat;
+        }
+
+        // Buildings
+        windowTex = GenerateWindowTexture();
+        buildingMat = new Material(SafeShader("Standard"));
+        buildingMat.color = new Color(0.1f, 0.1f, 0.12f);
+        buildingMat.SetFloat("_Glossiness", 0.8f);
+        buildingMat.mainTexture = windowTex;
+        
+        windowMat = new Material(SafeShader("Standard")); // For extra glowing bits
+        windowMat.EnableKeyword("_EMISSION");
+        windowMat.SetColor("_EmissionColor", new Color(0.8f, 0.9f, 1f));
+
+        // Lamps
+        lampMat = new Material(SafeShader("Standard"));
+        lampMat.color = new Color(0.2f, 0.2f, 0.2f);
+        lampMat.SetFloat("_Glossiness", 0.5f);
+        lampMat.SetFloat("_Metallic", 0.8f);
+
+        lampEmissive = new Material(SafeShader("Standard"));
+        lampEmissive.EnableKeyword("_EMISSION");
+        lampEmissive.SetColor("_EmissionColor", new Color(1f, 0.8f, 0.4f) * 2f);
+
+        // Rails
+        railMat = new Material(SafeShader("Standard"));
+        railMat.color = Color.gray;
+        railMat.SetFloat("_Glossiness", 0.7f);
+        railMat.SetFloat("_Metallic", 0.5f);
     }
 
     void Update()
     {
-        HandleCameraOrbit();
+        if (playerSphere == null) return;
+
+        // 1. Move Player Forward
+        float moveStep = speed * Time.deltaTime;
+        playerSphere.Translate(Vector3.forward * moveStep);
+        
+        // 2. Camera Follow (Smooth)
+        if (mainCamera != null) {
+            Vector3 targetPos = playerSphere.position + new Vector3(0, 6, -18);
+            mainCamera.position = Vector3.Lerp(mainCamera.position, targetPos, Time.deltaTime * 5f);
+            mainCamera.LookAt(playerSphere.position + Vector3.up * 2f);
+        }
+
+        // 3. Endless Generation Logic
+        // If player is getting close to the end of generated segments, spawn more
+        // We want to keep 'initialSegments' amount ahead.
+        // spawnZ is the Z coordinate of the NEXT segment to be spawned.
+        // If (spawnZ - playerZ) < (segments * length) / 2 ... spawn
+        
+        if ((spawnZ - playerSphere.position.z) < (initialSegments * segmentLength))
+        {
+            SpawnWorldSegment();
+            CleanupOldSegments();
+        }
     }
 
-    void HandleCameraOrbit()
+    void SpawnWorldSegment()
     {
-        if (cameraOrbitRoot == null) return;
+        // Container for this segment (easy cleanup)
+        GameObject segmentRoot = new GameObject("Segment_" + spawnZ);
+        segmentRoot.transform.SetParent(environmentRoot);
+        activeSegments.Add(segmentRoot);
 
-        // Simple touch/mouse orbit
-        if (Input.GetMouseButtonDown(0))
-        {
-            lastMousePos = Input.mousePosition;
-        }
-        else if (Input.GetMouseButton(0))
-        {
-            float deltaX = Input.mousePosition.x - lastMousePos.x;
-            orbitAngle += deltaX * 0.2f;
-            lastMousePos = Input.mousePosition;
-        }
-
-        // Apply orbit
-        cameraOrbitRoot.localRotation = Quaternion.Euler(0, orbitAngle, 0);
+        // 1. Road
+        CreateRoadChunk(segmentRoot.transform, spawnZ);
         
-        // Keep camera pointing at sphere
-        if (playerSphere != null && mainCamera != null)
+        // 2. Lamps (Left/Right)
+        CreateLamp(new Vector3(-50f, 0, spawnZ), 90f, segmentRoot.transform);
+        CreateLamp(new Vector3(50f, 0, spawnZ), -90f, segmentRoot.transform);
+
+        // 3. Guard Rails
+        CreateRailChunk(segmentRoot.transform, spawnZ);
+
+        // 4. Buildings (Randomly sparse or dense)
+        if (Random.value > 0.3f) CreateBuilding(new Vector3(-160f - Random.value * 50f, 0, spawnZ), segmentRoot.transform);
+        if (Random.value > 0.3f) CreateBuilding(new Vector3(160f + Random.value * 50f, 0, spawnZ), segmentRoot.transform);
+
+        // Advance Z
+        spawnZ += segmentLength;
+    }
+
+    void CleanupOldSegments()
+    {
+        // If we have too many, remove the oldest (index 0)
+        // Keep a buffer behind the player.
+        // If the oldest segment Z is far behind player...
+        
+        if (activeSegments.Count > 0)
         {
-            mainCamera.LookAt(playerSphere.position + Vector3.up * 0.5f);
+            GameObject oldest = activeSegments[0];
+            // Name format "Segment_100", but we can just check distance logic or list size
+            // Lets just keep fixed list size for simplicity + buffer
+            if (activeSegments.Count > initialSegments + 5) 
+            {
+                activeSegments.RemoveAt(0);
+                Destroy(oldest);
+            }
         }
+    }
+
+    // --- Object Creation Helpers ---
+
+    void CreateRoadChunk(Transform parent, float zPos)
+    {
+        GameObject road = GameObject.CreatePrimitive(PrimitiveType.Plane);
+        road.transform.SetParent(parent);
+        road.transform.localScale = new Vector3(15, 1, 10); // 150m wide, 100m long
+        road.transform.position = new Vector3(0, 0, zPos); // Centered on zPos? No, plane center is local 0.
+        // To make segments tile perfectly:
+        // Plane length 10 * 10 = 100. Center is at 0. Extends -50 to +50.
+        // If zPos is 0, it covers -50 to 50. Next zPos 100 covers 50 to 150. Correct.
+        
+        Renderer r = road.GetComponent<Renderer>();
+        r.material = roadMat;
+        r.material.mainTextureScale = new Vector2(1, 5); // Tile texture
+    }
+
+    void CreateRailChunk(Transform parent, float zPos)
+    {
+        // Left
+        GameObject l = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        l.transform.SetParent(parent);
+        l.transform.position = new Vector3(-60f, 2f, zPos);
+        l.transform.localScale = new Vector3(0.5f, 0.5f, segmentLength);
+        l.GetComponent<Renderer>().material = railMat;
+
+        // Right
+        GameObject r = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        r.transform.SetParent(parent);
+        r.transform.position = new Vector3(60f, 2f, zPos);
+        r.transform.localScale = new Vector3(0.5f, 0.5f, segmentLength);
+        r.GetComponent<Renderer>().material = railMat;
+    }
+
+    void CreateLamp(Vector3 pos, float rotY, Transform parent)
+    {
+        // Simple composite lamp
+        GameObject lamp = new GameObject("Lamp");
+        lamp.transform.SetParent(parent);
+        lamp.transform.position = pos;
+        lamp.transform.rotation = Quaternion.Euler(0, rotY, 0);
+
+        // Pole
+        GameObject pole = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        pole.transform.SetParent(lamp.transform);
+        pole.transform.localPosition = new Vector3(0, 7.5f, 0);
+        pole.transform.localScale = new Vector3(0.8f, 7.5f, 0.8f);
+        pole.GetComponent<Renderer>().material = lampMat;
+
+        // Arm
+        GameObject arm = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        arm.transform.SetParent(lamp.transform);
+        arm.transform.localPosition = new Vector3(3f, 14.5f, 0);
+        arm.transform.localScale = new Vector3(6f, 0.5f, 0.5f);
+        arm.GetComponent<Renderer>().material = lampMat;
+
+        // Head
+        GameObject head = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        head.transform.SetParent(lamp.transform);
+        head.transform.localPosition = new Vector3(5.5f, 14.2f, 0);
+        head.transform.localScale = new Vector3(1.5f, 1f, 1.5f);
+        head.GetComponent<Renderer>().material = lampEmissive;
+
+        // Light (Important! But expensive. Enable randomly or optimize?)
+        // Lets keep it for every lamp for now, but reduce range/shadows for performance
+        GameObject lightObj = new GameObject("Spot");
+        lightObj.transform.SetParent(head.transform);
+        lightObj.transform.localPosition = new Vector3(0, -0.5f, 0);
+        lightObj.transform.localRotation = Quaternion.Euler(90, 0, 0);
+        
+        Light l = lightObj.AddComponent<Light>();
+        l.type = LightType.Spot;
+        l.range = 60f;
+        l.spotAngle = 60f;
+        l.intensity = 2.0f;
+        l.color = new Color(1f, 0.85f, 0.6f);
+        l.shadows = LightShadows.Hard; // Hard shadows are cheaper than soft
+    }
+
+    void CreateBuilding(Vector3 pos, Transform parent)
+    {
+        float height = 50f + Random.value * 200f;
+        float width = 40f + Random.value * 40f;
+        float depth = 40f + Random.value * 40f;
+
+        GameObject b = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        b.transform.SetParent(parent);
+        b.transform.position = pos + new Vector3(0, height/2, 0);
+        b.transform.localScale = new Vector3(width, height, depth);
+        
+        Renderer r = b.GetComponent<Renderer>();
+        r.material = buildingMat;
+        // Tile texture to keep windows consistent size
+        r.material.mainTextureScale = new Vector2(width/10f, height/20f);
+        r.material.SetTexture("_EmissionMap", windowTex);
+    }
+
+    Texture2D GenerateWindowTexture()
+    {
+        int size = 256;
+        Texture2D tex = new Texture2D(size, size);
+        Color[] colors = new Color[size * size];
+        Color darkGlass = new Color(0.05f, 0.05f, 0.1f);
+        Color litRoom = new Color(1.0f, 0.9f, 0.6f);
+
+        for (int y = 0; y < size; y++) {
+            for (int x = 0; x < size; x++) {
+                bool isFrame = (x % 32 < 4) || (y % 64 < 8);
+                if (isFrame) colors[y*size + x] = Color.black;
+                else {
+                    float noise = Mathf.PerlinNoise(Mathf.Floor(x/32f)*0.5f, Mathf.Floor(y/64f)*0.5f);
+                    colors[y*size + x] = (noise > 0.4f) ? litRoom : darkGlass;
+                }
+            }
+        }
+        tex.SetPixels(colors);
+        tex.Apply();
+        return tex;
+    }
+
+    void CreateReflectiveSphere()
+    {
+        GameObject sphere = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        sphere.name = "Player";
+        sphere.transform.localScale = new Vector3(6, 6, 6);
+        sphere.transform.position = new Vector3(0, 3f, 0);
+        playerSphere = sphere.transform;
+
+        // Make it shiny
+        Renderer r = sphere.GetComponent<Renderer>();
+        Material mat = new Material(SafeShader("Standard"));
+        mat.SetFloat("_Glossiness", 0.95f);
+        mat.SetFloat("_Metallic", 1.0f);
+        r.material = mat;
+    }
+
+    void CreateReflectionProbe()
+    {
+        GameObject probeObj = new GameObject("Probe");
+        probeObj.transform.SetParent(playerSphere);
+        probeObj.transform.localPosition = new Vector3(0, 2, 0);
+        
+        ReflectionProbe probe = probeObj.AddComponent<ReflectionProbe>();
+        probe.mode = UnityEngine.Rendering.ReflectionProbeMode.Realtime;
+        probe.refreshMode = UnityEngine.Rendering.ReflectionProbeRefreshMode.EveryFrame;
+        probe.timeSlicingMode = UnityEngine.Rendering.ReflectionProbeTimeSlicingMode.IndividualFaces;
+        probe.size = new Vector3(300, 300, 300);
+        probe.resolution = 64; // Low res for mobile performance
     }
 
     void SetupCamera()
     {
-        GameObject root = new GameObject("CameraOrbitRoot");
-        cameraOrbitRoot = root.transform;
-        if (playerSphere != null) cameraOrbitRoot.position = playerSphere.position;
-
         GameObject camObj = GameObject.FindWithTag("MainCamera");
         if (camObj == null) {
             camObj = new GameObject("Main Camera");
@@ -90,350 +347,65 @@ public class SceneSetup : MonoBehaviour
             camObj.tag = "MainCamera";
         }
         mainCamera = camObj.transform;
-        mainCamera.SetParent(cameraOrbitRoot);
-        mainCamera.localPosition = new Vector3(0, 5, -20);
         
         Camera cam = camObj.GetComponent<Camera>();
-        // Set to Skybox mode to see the panoramic sky
         cam.clearFlags = CameraClearFlags.Skybox;
-        cam.farClipPlane = 10000f;
+        cam.farClipPlane = 2000f;
         cam.fieldOfView = 60f;
-        cam.allowHDR = true; // Essential for cinematic feel
+        cam.allowHDR = true;
     }
 
     void SetupLighting()
     {
-        GameObject light = new GameObject("Directional Light");
+        RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Trilight;
+        RenderSettings.ambientSkyColor = new Color(0.05f, 0.05f, 0.1f);
+        RenderSettings.ambientGroundColor = Color.black;
+        
+        GameObject light = new GameObject("Moon");
         Light l = light.AddComponent<Light>();
         l.type = LightType.Directional;
-        l.intensity = 1.0f; 
-        l.color = new Color(1.0f, 0.95f, 0.8f); 
-        light.transform.rotation = Quaternion.Euler(15, -160, 0); 
+        l.intensity = 0.3f;
+        l.color = new Color(0.2f, 0.3f, 0.5f);
+        light.transform.rotation = Quaternion.Euler(45, -30, 0);
     }
-
+    
     void SetupPostProcessing()
     {
-        // Simulate Cinematic Look without PostProcessing Stack
-        
-        // 1. Atmosphere / Fog
         RenderSettings.fog = true;
         RenderSettings.fogMode = FogMode.ExponentialSquared;
-        RenderSettings.fogDensity = 0.0015f;
-        RenderSettings.fogColor = new Color(0.02f, 0.02f, 0.05f); // Deep Night Blue
-
-        // 2. Ambient Light (Moonlight feel)
-        RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Flat;
-        RenderSettings.ambientLight = new Color(0.05f, 0.05f, 0.1f);
-
-        // 3. Adjust Main Light to look like Moon
-        GameObject dirLight = GameObject.Find("Directional Light");
-        if (dirLight) {
-            Light l = dirLight.GetComponent<Light>();
-            l.color = new Color(0.7f, 0.8f, 1.0f); // Cool blue-white
-            l.intensity = 0.4f; // Dimmer, let streetlights dominate
-            l.shadows = LightShadows.Soft;
-        }
-    }
-
-    private Shader SafeShader(string name) {
-        Shader s = Shader.Find(name);
-        if (s == null) s = Shader.Find("Standard");
-        if (s == null) s = Shader.Find("Diffuse");
-        if (s == null) s = Shader.Find("Unlit/Color");
-        if (s == null) s = Shader.Find("Sprites/Default");
-        return s;
+        RenderSettings.fogDensity = 0.002f;
+        RenderSettings.fogColor = new Color(0.01f, 0.01f, 0.02f);
     }
 
     void CreateSky()
     {
         Texture2D tex = Resources.Load<Texture2D>("Textures/SkyTex");
         if (tex == null) return;
-
-        // Try to use a Skybox material with Panoramic shader
-        Shader skyShader = Shader.Find("Skybox/Panoramic");
-        if (skyShader == null) skyShader = SafeShader("Unlit/Texture");
-
-        Material skyMat = new Material(skyShader);
-        if (skyShader.name.Contains("Panoramic")) {
-            skyMat.SetTexture("_MainTex", tex);
-            skyMat.SetFloat("_Exposure", 1.0f);
-            skyMat.SetFloat("_Rotation", 0f);
-            RenderSettings.skybox = skyMat;
-        } else {
-            // Fallback skysphere if shader missing
-            GameObject sky = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            sky.name = "SkySphere";
-            sky.transform.position = Vector3.zero;
-            sky.transform.localScale = new Vector3(-8000, -8000, -8000);
-            Destroy(sky.GetComponent<SphereCollider>());
-            Renderer r = sky.GetComponent<Renderer>();
-            r.material = skyMat;
-            r.material.mainTexture = tex;
-        }
-        
-        // Ensure lighting is updated
-        DynamicGI.UpdateEnvironment();
-    }
-
-    void CreateCityscape()
-    {
-        GameObject city = GameObject.CreatePrimitive(PrimitiveType.Quad);
-        city.name = "Cityscape";
-        city.transform.position = new Vector3(0, 100, 2500); 
-        city.transform.localScale = new Vector3(5000, 800, 1);
-
-        Renderer r = city.GetComponent<Renderer>();
-        // Use transparent shader for outline
-        Material mat = new Material(SafeShader("Unlit/Transparent"));
-        
-        Texture2D tex = Resources.Load<Texture2D>("Textures/CityOutline");
-        if (tex != null) {
-            mat.mainTexture = tex;
-            mat.mainTextureScale = new Vector2(4, 1); 
-        }
-        r.material = mat;
-    }
-
-    void CreateCityBuildings()
-    {
-        GameObject cityRoot = new GameObject("CityBuildings");
-        float startZ = -500f;
-        float endZ = 3500f;
-        float spacing = 80f;
-
-        Material buildingMat = new Material(SafeShader("Standard"));
-        buildingMat.color = new Color(0.1f, 0.1f, 0.12f);
-        buildingMat.SetFloat("_Glossiness", 0.4f);
-        buildingMat.SetFloat("_Metallic", 0.5f);
-
-        Material windowMat = new Material(SafeShader("Standard"));
-        windowMat.EnableKeyword("_EMISSION");
-        windowMat.SetColor("_EmissionColor", new Color(0.8f, 0.8f, 1f) * 0.5f);
-
-        System.Random rnd = new System.Random(42);
-
-        for (float z = startZ; z < endZ; z += spacing)
-        {
-            // Left Side Buildings
-            SpawnBuildingBlock(new Vector3(-150f - (float)rnd.NextDouble() * 50f, 0, z), cityRoot.transform, buildingMat, windowMat, rnd);
-            // Right Side Buildings
-            SpawnBuildingBlock(new Vector3(150f + (float)rnd.NextDouble() * 50f, 0, z), cityRoot.transform, buildingMat, windowMat, rnd);
+        Shader s = Shader.Find("Skybox/Panoramic");
+        if (s != null) {
+            Material m = new Material(s);
+            m.SetTexture("_MainTex", tex);
+            RenderSettings.skybox = m;
         }
     }
 
-    void SpawnBuildingBlock(Vector3 pos, Transform parent, Material baseMat, Material winMat, System.Random rnd)
-    {
-        float height = 50f + (float)rnd.NextDouble() * 150f;
-        float width = 40f + (float)rnd.NextDouble() * 30f;
-        float depth = 40f + (float)rnd.NextDouble() * 30f;
-
-        GameObject b = GameObject.CreatePrimitive(PrimitiveType.Cube);
-        b.name = "Building";
-        b.transform.SetParent(parent);
-        b.transform.position = pos + new Vector3(0, height / 2, 0);
-        b.transform.localScale = new Vector3(width, height, depth);
-        b.GetComponent<Renderer>().material = baseMat;
-
-        // Add some random "window" highlights
-        if (rnd.NextDouble() > 0.3) {
-            GameObject windows = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            windows.transform.SetParent(b.transform);
-            windows.transform.localPosition = new Vector3(0.51f, 0, 0); // Slightly offset to face the road
-            windows.transform.localScale = new Vector3(0.1f, 0.8f, 0.8f);
-            windows.GetComponent<Renderer>().material = winMat;
-            Destroy(windows.GetComponent<BoxCollider>());
-        }
-    }
-
-    void CreateHighway()
-    {
-        // PHASE 1: Segmented Road System for better lighting and fog
-        GameObject roadRoot = new GameObject("HighwaySegments");
-        
-        Material mat = Resources.Load<Material>("Materials/HighwayMaterial");
-        Texture2D tex = Resources.Load<Texture2D>("Textures/HighwayTex");
-        
-        if (mat == null) {
-            mat = new Material(SafeShader("Standard"));
-        }
-        
-        // PBR Setup for "Real Asphalt"
-        mat.EnableKeyword("_NORMALMAP");
-        mat.EnableKeyword("_METALLICGLOSSMAP");
-        mat.SetFloat("_Glossiness", 0.85f); // High smoothness for "wet" look
-        mat.SetFloat("_Metallic", 0.0f);    // Asphalt is non-metal
-        mat.SetColor("_Color", new Color(0.2f, 0.2f, 0.2f)); // Darker asphalt
-        
-        if (tex != null) {
-            tex.anisoLevel = 16;
-            tex.filterMode = FilterMode.Trilinear;
-            mat.mainTexture = tex;
-        }
-
-        // Generate 40 segments (40 * 100m = 4000m total length)
-        for (int i = 0; i < 40; i++)
-        {
-            GameObject segment = GameObject.CreatePrimitive(PrimitiveType.Plane);
-            segment.name = "RoadSegment_" + i;
-            segment.transform.SetParent(roadRoot.transform);
-            
-            // Plane is 10x10. We want 150m wide, 100m long.
-            // Scale X = 15. Scale Z = 10.
-            segment.transform.localScale = new Vector3(15, 1, 10);
-            
-            // Position: Center is 0. Start at -500. i*100 offset.
-            // Z = -500 + (i * 100) + 50 (half length offset)
-            float zPos = -500f + (i * 100f) + 50f;
-            segment.transform.position = new Vector3(0, 0, zPos);
-            
-            Renderer r = segment.GetComponent<Renderer>();
-            r.material = mat;
-            // Tiling: 1 across, 5 down per segment (for 100m)
-            r.material.mainTextureScale = new Vector2(1, 5);
-        }
-    }
-
-    void CreateReflectiveSphere()
-    {
-        GameObject sphere = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-        sphere.name = "ReflectiveSphere";
-        sphere.transform.localScale = new Vector3(6, 6, 6);
-        sphere.transform.position = new Vector3(0, 3f, 0);
-        playerSphere = sphere.transform;
-
-        Renderer r = sphere.GetComponent<Renderer>();
-        Material mat = Resources.Load<Material>("Materials/SphereMaterial");
-        Texture2D tex = Resources.Load<Texture2D>("Textures/SphereTex");
-
-        if (mat == null) {
-            mat = new Material(SafeShader("Standard"));
-            mat.SetFloat("_Glossiness", 0.95f);
-            mat.SetFloat("_Metallic", 1.0f); // Chrome
-        }
-        
-        if (tex != null) mat.mainTexture = tex;
-        r.material = mat;
+    private Shader SafeShader(string name) {
+        Shader s = Shader.Find(name);
+        if (s == null) s = Shader.Find("Standard");
+        return s;
     }
     
-    // --- Phase 3: Cinematic Overhaul Procedures ---
-
-    void CreateStreetLamps()
-    {
-        GameObject lampRoot = new GameObject("StreetLamps");
-        // Highway runs from approx Z = -500 to +3500 (Center 1500, Scale 400->4000 length)
-        // Center is 1500. Extent is 2000. Start = 1500 - 2000 = -500. End = 3500.
-        float startZ = -400f;
-        float endZ = 3400f;
-        float spacing = 120f; // Distance between lamps
-
-        // Create a shared material for poles
-        Material metalMat = new Material(SafeShader("Standard"));
-        metalMat.color = new Color(0.2f, 0.2f, 0.2f);
-        metalMat.SetFloat("_Glossiness", 0.5f);
-        metalMat.SetFloat("_Metallic", 0.8f);
-
-        for (float z = startZ; z < endZ; z += spacing)
-        {
-            // Left Lamp
-            CreateSingleLamp(new Vector3(-50f, 0, z), 90f, lampRoot.transform, metalMat);
-            // Right Lamp
-            CreateSingleLamp(new Vector3(50f, 0, z), -90f, lampRoot.transform, metalMat);
-        }
-    }
-
-    void CreateSingleLamp(Vector3 pos, float rotY, Transform parent, Material mat)
-    {
-        GameObject lamp = new GameObject("Lamp");
-        lamp.transform.position = pos;
-        lamp.transform.rotation = Quaternion.Euler(0, rotY, 0);
-        lamp.transform.SetParent(parent);
-
-        // Pole
-        GameObject pole = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-        pole.transform.SetParent(lamp.transform);
-        pole.transform.localPosition = new Vector3(0, 7.5f, 0); 
-        pole.transform.localScale = new Vector3(0.8f, 7.5f, 0.8f);
-        pole.GetComponent<Renderer>().material = mat;
-        
-        // Arm
-        GameObject arm = GameObject.CreatePrimitive(PrimitiveType.Cube);
-        arm.transform.SetParent(lamp.transform);
-        arm.transform.localPosition = new Vector3(3f, 14.5f, 0);
-        arm.transform.localScale = new Vector3(6f, 0.5f, 0.5f);
-        arm.GetComponent<Renderer>().material = mat;
-
-        // Lamp Head
-        GameObject head = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-        head.transform.SetParent(lamp.transform);
-        head.transform.localPosition = new Vector3(5.5f, 14.2f, 0);
-        head.transform.localScale = new Vector3(1.5f, 1f, 1.5f);
-        // Emissive material for head
-        Material emissive = new Material(SafeShader("Standard"));
-        emissive.EnableKeyword("_EMISSION");
-        emissive.SetColor("_EmissionColor", new Color(1f, 0.8f, 0.4f) * 2f);
-        head.GetComponent<Renderer>().material = emissive;
-
-        // Light Source
-        GameObject lightObj = new GameObject("StreetLightSpot");
-        lightObj.transform.SetParent(head.transform);
-        lightObj.transform.localPosition = new Vector3(0, -0.5f, 0);
-        lightObj.transform.localRotation = Quaternion.Euler(90, 0, 0); // Point down
-        
-        Light l = lightObj.AddComponent<Light>();
-        l.type = LightType.Spot;
-        l.range = 80f;
-        l.spotAngle = 70f;
-        l.intensity = 3.0f;
-        l.color = new Color(1f, 0.85f, 0.6f); // Warm sodium vapor
-        l.shadows = LightShadows.Hard; // Dramatic shadows
-    }
-
-    void CreateGuardRails()
-    {
-        GameObject railRoot = new GameObject("GuardRails");
-        float startZ = -500f;
-        float endZ = 3500f;
-        float length = endZ - startZ;
-        Vector3 centerPos = new Vector3(0, 1.5f, startZ + length/2f);
-
-        Material railMat = new Material(SafeShader("Standard"));
-        railMat.color = Color.gray;
-        railMat.SetFloat("_Glossiness", 0.7f);
-        railMat.SetFloat("_Metallic", 0.5f);
-
-        // We use stretched cubes for rails for performance instead of thousands of small posts
-        
-        // Left Rail Top
-        GameObject leftTop = GameObject.CreatePrimitive(PrimitiveType.Cube);
-        leftTop.name = "LeftRailTop";
-        leftTop.transform.SetParent(railRoot.transform);
-        leftTop.transform.position = new Vector3(-60f, 2f, centerPos.z);
-        leftTop.transform.localScale = new Vector3(0.5f, 0.5f, length);
-        leftTop.GetComponent<Renderer>().material = railMat;
-
-        // Left Rail Posts (Visual only, spread out)
-        // ... omitted for simplicity, the rail strip is enough for the look at speed
-
-        // Right Rail Top
-        GameObject rightTop = GameObject.CreatePrimitive(PrimitiveType.Cube);
-        rightTop.name = "RightRailTop";
-        rightTop.transform.SetParent(railRoot.transform);
-        rightTop.transform.position = new Vector3(60f, 2f, centerPos.z);
-        rightTop.transform.localScale = new Vector3(0.5f, 0.5f, length);
-        rightTop.GetComponent<Renderer>().material = railMat;
-    }
-
     void OnGUI()
     {
         GUIStyle style = new GUIStyle();
         style.fontSize = 24;
         style.normal.textColor = Color.cyan;
-        GUI.Label(new Rect(20, 20, Screen.width - 40, 40), "ReflectiveHighway v1.2.0 - Cinematic", style);
+        float distance = playerSphere != null ? playerSphere.position.z : 0;
+        GUI.Label(new Rect(20, 20, 400, 40), "Distance: " + (int)distance + "m", style);
         
         if (errorMessage != "None") {
             style.normal.textColor = Color.red;
-            style.wordWrap = true;
-            GUI.Label(new Rect(20, 70, Screen.width - 40, Screen.height - 100), "Error: " + errorMessage, style);
+            GUI.Label(new Rect(20, 70, Screen.width, Screen.height), errorMessage, style);
         }
     }
 }
