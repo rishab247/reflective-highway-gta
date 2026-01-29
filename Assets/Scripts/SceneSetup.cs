@@ -96,9 +96,9 @@ public class SceneSetup : MonoBehaviour
 
         // Car Materials
         carBodyMat = new Material(SafeShader("Standard"));
-        carBodyMat.color = new Color(0.1f, 0.1f, 0.1f); // Black stealth
+        carBodyMat.color = new Color(0.8f, 0.8f, 0.9f); // Silver Chrome
         carBodyMat.SetFloat("_Glossiness", 0.95f);
-        carBodyMat.SetFloat("_Metallic", 0.9f);
+        carBodyMat.SetFloat("_Metallic", 1.0f);
         
         carGlassMat = new Material(SafeShader("Standard"));
         carGlassMat.color = new Color(0, 0, 0, 0.8f);
