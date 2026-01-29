@@ -247,13 +247,9 @@ public class SceneSetup : MonoBehaviour
 
     void CreateHighway()
     {
-        GameObject ground = GameObject.CreatePrimitive(PrimitiveType.Plane);
-        ground.name = "Highway";
-        // Plane is 10x10. Scale (15, 1, 400) -> 150 wide, 4000 long
-        ground.transform.localScale = new Vector3(15, 1, 400); 
-        ground.transform.position = new Vector3(0, 0, 1500); 
-
-        Renderer r = ground.GetComponent<Renderer>();
+        // PHASE 1: Segmented Road System for better lighting and fog
+        GameObject roadRoot = new GameObject("HighwaySegments");
+        
         Material mat = Resources.Load<Material>("Materials/HighwayMaterial");
         Texture2D tex = Resources.Load<Texture2D>("Textures/HighwayTex");
         
@@ -261,21 +257,40 @@ public class SceneSetup : MonoBehaviour
             mat = new Material(SafeShader("Standard"));
         }
         
-        // Setup Wet Road Atmosphere
-        mat.EnableKeyword("_SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A");
-        mat.SetFloat("_Glossiness", 0.92f); // Extremely wet/reflective
-        mat.SetFloat("_Metallic", 0.4f); // Asphalt has some specular
+        // PBR Setup for "Real Asphalt"
+        mat.EnableKeyword("_NORMALMAP");
+        mat.EnableKeyword("_METALLICGLOSSMAP");
+        mat.SetFloat("_Glossiness", 0.85f); // High smoothness for "wet" look
+        mat.SetFloat("_Metallic", 0.0f);    // Asphalt is non-metal
+        mat.SetColor("_Color", new Color(0.2f, 0.2f, 0.2f)); // Darker asphalt
         
         if (tex != null) {
-            // FIX: Road blur by increasing anisotropy and filter mode
             tex.anisoLevel = 16;
             tex.filterMode = FilterMode.Trilinear;
-            
             mat.mainTexture = tex;
-            mat.mainTextureScale = new Vector2(1, 400); // Increased tiling for better detail
         }
 
-        r.material = mat;
+        // Generate 40 segments (40 * 100m = 4000m total length)
+        for (int i = 0; i < 40; i++)
+        {
+            GameObject segment = GameObject.CreatePrimitive(PrimitiveType.Plane);
+            segment.name = "RoadSegment_" + i;
+            segment.transform.SetParent(roadRoot.transform);
+            
+            // Plane is 10x10. We want 150m wide, 100m long.
+            // Scale X = 15. Scale Z = 10.
+            segment.transform.localScale = new Vector3(15, 1, 10);
+            
+            // Position: Center is 0. Start at -500. i*100 offset.
+            // Z = -500 + (i * 100) + 50 (half length offset)
+            float zPos = -500f + (i * 100f) + 50f;
+            segment.transform.position = new Vector3(0, 0, zPos);
+            
+            Renderer r = segment.GetComponent<Renderer>();
+            r.material = mat;
+            // Tiling: 1 across, 5 down per segment (for 100m)
+            r.material.mainTextureScale = new Vector2(1, 5);
+        }
     }
 
     void CreateReflectiveSphere()
