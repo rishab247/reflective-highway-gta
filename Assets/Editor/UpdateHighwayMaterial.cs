@@ -12,8 +12,14 @@ public class UpdateHighwayMaterial : MonoBehaviour
 
         if (mat == null)
         {
-            Debug.LogError("Material not found!");
-            return;
+            Debug.LogError("Material not found! Creating new one.");
+            mat = new Material(Shader.Find("Standard"));
+            AssetDatabase.CreateAsset(mat, matPath);
+        }
+        else
+        {
+            // FORCE Standard shader to ensure it's included in build
+            mat.shader = Shader.Find("Standard");
         }
 
         // Load Maps
