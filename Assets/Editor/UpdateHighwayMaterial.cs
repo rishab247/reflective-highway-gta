@@ -1,38 +1,62 @@
-
 using UnityEngine;
 using UnityEditor;
 
-public class UpdateHighwayMaterial : Editor
+public class UpdateHighwayMaterial : MonoBehaviour
 {
-    public static void ApplyUpdates()
+#if UNITY_EDITOR
+    [MenuItem("Tools/Update Highway Material")]
+    public static void UpdateMaterial()
     {
         string matPath = "Assets/Resources/Materials/HighwayMaterial.mat";
         Material mat = AssetDatabase.LoadAssetAtPath<Material>(matPath);
 
         if (mat == null)
         {
-            Debug.LogError("HighwayMaterial not found at " + matPath);
+            Debug.LogError("Material not found!");
             return;
         }
 
-        // Load textures
-        Texture2D albedo = AssetDatabase.LoadAssetAtPath<Texture2D>("Assets/Resources/Textures/HighwayTex.jpg");
-        Texture2D normal = AssetDatabase.LoadAssetAtPath<Texture2D>("Assets/Resources/Textures/HighwayNormal.jpg");
-
-        if (albedo != null) mat.mainTexture = albedo;
-        if (normal != null) 
+        // Load Maps
+        Texture2D normalMap = AssetDatabase.LoadAssetAtPath<Texture2D>("Assets/Resources/Textures/HighwayNormal.png");
+        Texture2D maskMap = AssetDatabase.LoadAssetAtPath<Texture2D>("Assets/Resources/Textures/HighwayMask.png");
+        
+        if (normalMap)
         {
-            mat.SetTexture("_BumpMap", normal);
+            TextureImporter importer = (TextureImporter)AssetImporter.GetAtPath(AssetDatabase.GetAssetPath(normalMap));
+            if (importer.textureType != TextureImporterType.NormalMap)
+            {
+                importer.textureType = TextureImporterType.NormalMap;
+                importer.SaveAndReimport();
+            }
+            mat.SetTexture("_BumpMap", normalMap);
             mat.EnableKeyword("_NORMALMAP");
+            Debug.Log("Applied Normal Map.");
         }
 
-        // Make it WET
-        mat.SetFloat("_Glossiness", 0.85f); // High smoothness for wet look
-        mat.SetFloat("_Metallic", 0.1f);   // Slight metallic for asphalt shine
+        if (maskMap)
+        {
+            // Set as Mask Map (Metallic/Smoothness)
+            mat.SetTexture("_MetallicGlossMap", maskMap); // Standard shader slot
+            mat.SetFloat("_Smoothness", 1.0f); // Map controls value
+            mat.EnableKeyword("_METALLICGLOSSMAP");
+            Debug.Log("Applied Mask Map.");
+        }
+        
+        // Settings for "Wet" look
+        mat.SetFloat("_Glossiness", 0.9f); // High base smoothness
+        mat.SetFloat("_Metallic", 0.0f);   // Asphalt isn't metal
 
         EditorUtility.SetDirty(mat);
         AssetDatabase.SaveAssets();
-
-        Debug.Log("Highway Material updated with High-Res textures and Wet look!");
     }
+    
+    [MenuItem("Tools/Update Building Windows")]
+    public static void UpdateBuildings()
+    {
+         // Find materials named "BuildingMaterial" or similar if they exist
+         // or specific ones used in scene. 
+         // For this task, we'll try to find a material or just log instructions.
+         Debug.Log("Building update requires specific material targeting. Please assign 'BuildingSmoothness.png' to the Metallic/Smoothness slot of your building materials manually if not using a shared one.");
+    }
+#endif
 }
