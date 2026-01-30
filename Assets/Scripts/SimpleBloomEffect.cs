@@ -10,8 +10,8 @@ public class SimpleBloomEffect : MonoBehaviour
         if (s != null)
         {
             bloomMat = new Material(s);
-            bloomMat.SetFloat("_Threshold", 0.7f);
-            bloomMat.SetFloat("_Intensity", 1.2f);
+            bloomMat.SetFloat("_Threshold", 0.8f); // Pick up only bright highlights
+            bloomMat.SetFloat("_Intensity", 1.0f); // Subtle glow, not washed out
         }
     }
 

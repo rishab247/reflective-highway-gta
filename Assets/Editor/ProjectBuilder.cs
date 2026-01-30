@@ -12,6 +12,10 @@ public class ProjectBuilder
         // Note: In a real editor script we would add to the m_AlwaysIncludedShaders list here.
         // For now, our pre-built Materials in the Resources folder act as the reference.
 
+        // 0. Setup Post Processing
+        SetupPostProcessing.ApplyPostProcessing();
+        UpdateHighwayMaterial.ApplyUpdates();
+
         // 1. Create a scene
         var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
         
