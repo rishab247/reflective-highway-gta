@@ -38,7 +38,16 @@ public class CarSplashEffect : MonoBehaviour
             shape.radius = 0.5f;
             
             var renderer = go.GetComponent<ParticleSystemRenderer>();
-            renderer.material = new Material(Shader.Find("Particles/Standard Unlit"));
+            
+            // Try standard particle shader, fallback to whatever we can find
+            Shader pShader = Shader.Find("Particles/Standard Unlit");
+            if (pShader == null) pShader = Shader.Find("Mobile/Particles/Alpha Blended");
+            if (pShader == null) pShader = Shader.Find("Legacy Shaders/Particles/Alpha Blended");
+            if (pShader == null) pShader = Shader.Find("Mobile/Diffuse"); // Emergency fallback
+            
+            if (pShader != null) {
+                renderer.material = new Material(pShader);
+            }
         }
         else
         {

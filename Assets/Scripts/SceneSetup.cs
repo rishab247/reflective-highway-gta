@@ -174,8 +174,13 @@ public class SceneSetup : MonoBehaviour
         float fps = 1.0f / Time.unscaledDeltaTime;
         diagnostics = string.Format("FPS: {0:F0} | Segs: {1} | Mem: {2}MB", fps, activeSegments.Count, System.GC.GetTotalMemory(false) / 1024 / 1024);
 
+        // Move Car Forward
+        currentSpeed = Mathf.Lerp(currentSpeed, 40f, Time.deltaTime * 0.5f); // Accelerate to 40
+        playerCar.Translate(Vector3.forward * currentSpeed * Time.deltaTime);
+        
+        // Move Car Sideways
         Vector3 targetLanePos = playerCar.position;
-        targetLanePos.x = Mathf.Clamp(targetLanePos.x + (Input.GetAxis("Horizontal") * 10f * Time.deltaTime), -8, 8); 
+        targetLanePos.x = Mathf.Clamp(targetLanePos.x + (Input.GetAxis("Horizontal") * 20f * Time.deltaTime), -8, 8); 
         playerCar.position = targetLanePos;
         
         mainCamera.position = playerCar.position + new Vector3(0, 3.5f, -8f);
