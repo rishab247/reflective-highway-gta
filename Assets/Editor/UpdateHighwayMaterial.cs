@@ -7,62 +7,97 @@ public class UpdateHighwayMaterial : MonoBehaviour
     [MenuItem("Tools/Update Highway Material")]
     public static void UpdateMaterial()
     {
+        // 1. Road Material
         string matPath = "Assets/Resources/Materials/HighwayMaterial.mat";
         Material mat = AssetDatabase.LoadAssetAtPath<Material>(matPath);
 
         if (mat == null)
         {
-            Debug.LogError("Material not found! Creating new one.");
+            Debug.Log("Creating new Road Material...");
             mat = new Material(Shader.Find("Standard"));
             AssetDatabase.CreateAsset(mat, matPath);
         }
         else
         {
-            // FORCE Standard shader to ensure it's included in build
             mat.shader = Shader.Find("Standard");
         }
 
-        // Load Maps
         Texture2D normalMap = AssetDatabase.LoadAssetAtPath<Texture2D>("Assets/Resources/Textures/HighwayNormal.png");
         Texture2D maskMap = AssetDatabase.LoadAssetAtPath<Texture2D>("Assets/Resources/Textures/HighwayMask.png");
         
-        if (normalMap)
-        {
+        if (normalMap) {
             TextureImporter importer = (TextureImporter)AssetImporter.GetAtPath(AssetDatabase.GetAssetPath(normalMap));
-            if (importer.textureType != TextureImporterType.NormalMap)
-            {
+            if (importer.textureType != TextureImporterType.NormalMap) {
                 importer.textureType = TextureImporterType.NormalMap;
                 importer.SaveAndReimport();
             }
             mat.SetTexture("_BumpMap", normalMap);
             mat.EnableKeyword("_NORMALMAP");
-            Debug.Log("Applied Normal Map.");
         }
 
-        if (maskMap)
-        {
-            // Set as Mask Map (Metallic/Smoothness)
-            mat.SetTexture("_MetallicGlossMap", maskMap); // Standard shader slot
-            mat.SetFloat("_Smoothness", 1.0f); // Map controls value
+        if (maskMap) {
+            mat.SetTexture("_MetallicGlossMap", maskMap); 
+            mat.SetFloat("_Smoothness", 1.0f); 
             mat.EnableKeyword("_METALLICGLOSSMAP");
-            Debug.Log("Applied Mask Map.");
         }
         
-        // Settings for "Wet" look
-        mat.SetFloat("_Glossiness", 0.9f); // High base smoothness
-        mat.SetFloat("_Metallic", 0.0f);   // Asphalt isn't metal
-
+        mat.SetFloat("_Glossiness", 0.9f);
+        mat.SetFloat("_Metallic", 0.0f);
         EditorUtility.SetDirty(mat);
+
+        // 2. Building Material
+        string buildMatPath = "Assets/Resources/Materials/BuildingMaterial.mat";
+        Material buildMat = AssetDatabase.LoadAssetAtPath<Material>(buildMatPath);
+        if (buildMat == null)
+        {
+            buildMat = new Material(Shader.Find("Standard"));
+            AssetDatabase.CreateAsset(buildMat, buildMatPath);
+        }
+        else
+        {
+            buildMat.shader = Shader.Find("Standard");
+        }
+
+        Texture2D buildTex = AssetDatabase.LoadAssetAtPath<Texture2D>("Assets/Resources/Textures/BuildingTex_V2.png");
+        if (buildTex != null)
+        {
+            buildMat.mainTexture = buildTex;
+            // Make windows reflective
+            buildMat.SetFloat("_Glossiness", 0.9f); 
+            buildMat.SetFloat("_Metallic", 0.3f); // Steel/Glass look
+        }
+        EditorUtility.SetDirty(buildMat);
+
+        // 3. Ground/Sidewalk Material
+        string groundMatPath = "Assets/Resources/Materials/GroundMaterial.mat";
+        Material groundMat = AssetDatabase.LoadAssetAtPath<Material>(groundMatPath);
+        if (groundMat == null)
+        {
+            groundMat = new Material(Shader.Find("Standard"));
+            AssetDatabase.CreateAsset(groundMat, groundMatPath);
+        }
+        else
+        {
+            groundMat.shader = Shader.Find("Standard");
+        }
+
+        Texture2D groundTex = AssetDatabase.LoadAssetAtPath<Texture2D>("Assets/Resources/Textures/GroundTex.png");
+        if (groundTex != null)
+        {
+            groundMat.mainTexture = groundTex;
+            groundMat.SetFloat("_Glossiness", 0.2f); // Matte concrete
+            groundMat.SetFloat("_Metallic", 0.0f);
+        }
+        EditorUtility.SetDirty(groundMat);
+
         AssetDatabase.SaveAssets();
+        Debug.Log("All Materials Updated.");
     }
     
     [MenuItem("Tools/Update Building Windows")]
     public static void UpdateBuildings()
     {
-         // Find materials named "BuildingMaterial" or similar if they exist
-         // or specific ones used in scene. 
-         // For this task, we'll try to find a material or just log instructions.
-         Debug.Log("Building update requires specific material targeting. Please assign 'BuildingSmoothness.png' to the Metallic/Smoothness slot of your building materials manually if not using a shared one.");
+         Debug.Log("Building update handled in main function.");
     }
 #endif
 }

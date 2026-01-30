@@ -36,6 +36,9 @@ public class SceneSetup : MonoBehaviour
         }
     }
 
+    private TouchControl btnLeft, btnRight, btnGas, btnBrake;
+    private ProceduralEngineAudio audioSys;
+
     void Start() {
         try {
             environmentRoot = new GameObject("Environment").transform;
@@ -43,6 +46,7 @@ public class SceneSetup : MonoBehaviour
             PrepareMaterials();
             SetupLighting();
             CreatePlayerCar();
+            SetupHUD(); // NEW: Create UI
             for (int i = 0; i < initialSegments; i++) SpawnWorldSegment();
             diagnostics = "Nominal";
         } catch (System.Exception e) {
@@ -51,120 +55,105 @@ public class SceneSetup : MonoBehaviour
         }
     }
 
-    void SetupCamera() {
-        GameObject camObj = GameObject.FindWithTag("MainCamera"); 
-        if (camObj == null) { camObj = new GameObject("Main Camera"); camObj.AddComponent<Camera>(); camObj.tag = "MainCamera"; }
-        mainCamera = camObj.transform; 
-        Camera cam = camObj.GetComponent<Camera>(); 
-        cam.clearFlags = CameraClearFlags.SolidColor; 
-        cam.backgroundColor = new Color(0, 0, 0.05f); 
-        cam.farClipPlane = 2000f; 
-        cam.allowHDR = false; 
-        cam.allowMSAA = false;
+    void SetupHUD() {
+        GameObject canvasObj = new GameObject("Canvas");
+        Canvas canvas = canvasObj.AddComponent<Canvas>();
+        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        canvasObj.AddComponent<CanvasScaler>();
+        canvasObj.AddComponent<GraphicRaycaster>();
+        
+        // Event System
+        GameObject es = new GameObject("EventSystem");
+        es.AddComponent<EventSystem>();
+        es.AddComponent<StandaloneInputModule>();
+
+        // Controls
+        btnLeft = CreateTouchButton(canvasObj, "Left", "Textures/UI_SteeringWheel", new Vector2(150, 150), new Vector2(0, 0), new Vector3(0, 0, 90));
+        btnRight = CreateTouchButton(canvasObj, "Right", "Textures/UI_SteeringWheel", new Vector2(150, 150), new Vector2(350, 0), new Vector3(0, 0, -90));
+        
+        btnBrake = CreateTouchButton(canvasObj, "Brake", "Textures/UI_BrakePedal", new Vector2(120, 200), new Vector2(-300, 0), Vector3.zero, new Vector2(1, 0));
+        btnGas = CreateTouchButton(canvasObj, "Gas", "Textures/UI_GasPedal", new Vector2(120, 250), new Vector2(-100, 0), Vector3.zero, new Vector2(1, 0));
     }
 
-    void SetupLighting() {
-        GameObject sun = new GameObject("Sun");
-        Light l = sun.AddComponent<Light>();
-        l.type = LightType.Directional;
-        l.color = new Color(0.7f, 0.8f, 1.0f);
-        l.intensity = 1.0f; 
-        sun.transform.rotation = Quaternion.Euler(50, -30, 0);
-        RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Flat;
-        RenderSettings.ambientLight = new Color(0.1f, 0.1f, 0.2f);
+    TouchControl CreateTouchButton(GameObject parent, string name, string spritePath, Vector2 size, Vector2 offset, Vector3 rot, Vector2? anchorOverride = null) {
+        GameObject go = new GameObject(name);
+        go.transform.SetParent(parent.transform, false);
+        Image img = go.AddComponent<Image>();
+        Sprite s = Resources.Load<Sprite>(spritePath);
+        if (s != null) img.sprite = s;
+        else img.color = new Color(1,1,1,0.5f); // Fallback box
+        
+        RectTransform rt = go.GetComponent<RectTransform>();
+        rt.sizeDelta = size;
+        
+        if (anchorOverride.HasValue) {
+            rt.anchorMin = rt.anchorMax = anchorOverride.Value; // Custom corner
+        } else {
+            rt.anchorMin = rt.anchorMax = new Vector2(0, 0); // Bottom Left default
+        }
+        
+        rt.anchoredPosition = offset + (anchorOverride.HasValue ? Vector2.zero : new Vector2(size.x/2, size.y/2));
+        rt.localRotation = Quaternion.Euler(rot);
+        
+        return go.AddComponent<TouchControl>();
     }
 
-    void PrepareMaterials() {
-        // Use Standard shader for PBR effects (Normals, Reflections)
-        Shader standard = Shader.Find("Standard");
+    void CreatePlayerCar() {
+        playerCar = new GameObject("PlayerCar").transform;
+        playerCar.position = new Vector3(0, 0.5f, 0);
+        playerCar.gameObject.AddComponent<CarSplashEffect>();
+        audioSys = playerCar.gameObject.AddComponent<ProceduralEngineAudio>();
+
+        // --- High Def Composite Car ---
         
-        // Fallback chain if Standard is stripped/missing
-        if (standard == null) standard = Shader.Find("Mobile/Bumped Specular"); 
-        if (standard == null) standard = Shader.Find("Mobile/Diffuse");
-        if (standard == null) standard = Shader.Find("Diffuse");
+        // Chassis (Main Body)
+        GameObject chassis = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        chassis.transform.SetParent(playerCar);
+        chassis.transform.localPosition = new Vector3(0, 0.4f, 0);
+        chassis.transform.localScale = new Vector3(2.0f, 0.6f, 4.8f);
+        chassis.GetComponent<Renderer>().material = carBodyMat;
+
+        // Cabin (Top)
+        GameObject cabin = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        cabin.transform.SetParent(playerCar);
+        cabin.transform.localPosition = new Vector3(0, 1.0f, -0.3f);
+        cabin.transform.localScale = new Vector3(1.7f, 0.6f, 2.5f);
+        cabin.GetComponent<Renderer>().material = carGlassMat; // Glass material
+
+        // Roof (Top of cabin, body color)
+        GameObject roof = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        roof.transform.SetParent(playerCar);
+        roof.transform.localPosition = new Vector3(0, 1.31f, -0.3f);
+        roof.transform.localScale = new Vector3(1.72f, 0.05f, 2.55f);
+        roof.GetComponent<Renderer>().material = carBodyMat;
+
+        // Wheels
+        CreateWheel(new Vector3(-1.1f, 0.4f, 1.5f));
+        CreateWheel(new Vector3(1.1f, 0.4f, 1.5f));
+        CreateWheel(new Vector3(-1.1f, 0.4f, -1.5f));
+        CreateWheel(new Vector3(1.1f, 0.4f, -1.5f));
         
-        if (standard == null) {
-            LogAndCopy("CRITICAL: No suitable shader found. Falling back to default material.");
-            // Don't crash, just let materials be magenta (null shader logic handled by Unity or we skip)
-            return; 
-        }
-
-        // Load Road Material with PBR Maps
-        roadMat = new Material(standard);
-        roadMat.name = "HighwayMat_Runtime";
+        // Headlights
+        GameObject lightL = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        lightL.transform.SetParent(playerCar);
+        lightL.transform.localPosition = new Vector3(-0.7f, 0.5f, 2.45f);
+        lightL.transform.localScale = new Vector3(0.4f, 0.2f, 0.1f);
+        lightL.GetComponent<Renderer>().material = lampEmissive;
         
-        Texture2D roadTex = Resources.Load<Texture2D>("Textures/HighwayTex"); 
-        if (roadTex == null) roadTex = Resources.Load<Texture2D>("Textures/WetAsphalt_Albedo");
-        if (roadTex != null) roadMat.mainTexture = roadTex;
-
-        // Only try to set PBR properties if we actually got the Standard shader
-        if (standard.name == "Standard") {
-            Texture2D roadNormal = Resources.Load<Texture2D>("Textures/HighwayNormal");
-            if (roadNormal != null) {
-                roadMat.SetTexture("_BumpMap", roadNormal);
-                roadMat.EnableKeyword("_NORMALMAP");
-            }
-
-            Texture2D roadMask = Resources.Load<Texture2D>("Textures/HighwayMask");
-            if (roadMask != null) {
-                roadMat.SetTexture("_MetallicGlossMap", roadMask);
-                roadMat.SetFloat("_Smoothness", 1.0f); 
-                roadMat.EnableKeyword("_METALLICGLOSSMAP");
-            } else {
-                roadMat.SetFloat("_Glossiness", 0.85f);
-                roadMat.SetFloat("_Metallic", 0.0f);
-            }
-        }
-
-        // Building Material
-        buildingMat = new Material(standard);
-        Texture2D buildTex = Resources.Load<Texture2D>("Textures/BuildingColor");
-        if (buildTex != null) buildingMat.mainTexture = buildTex;
-        
-        if (standard.name == "Standard") {
-            buildingMat.SetFloat("_Glossiness", 0.6f); // Reflective windows
-            buildingMat.SetFloat("_Metallic", 0.2f);
-        }
-        buildingMat.color = new Color(0.6f, 0.6f, 0.7f);
-
-        carBodyMat = new Material(standard);
-        carBodyMat.color = new Color(0.5f, 0.5f, 0.6f); 
-        if (standard.name == "Standard") {
-            carBodyMat.SetFloat("_Glossiness", 0.8f);
-            carBodyMat.SetFloat("_Metallic", 0.6f);
-        }
-
-        carGlassMat = new Material(standard);
-        carGlassMat.color = new Color(0.1f, 0.2f, 0.3f);
-        if (standard.name == "Standard") {
-            carGlassMat.SetFloat("_Glossiness", 0.95f); // Very reflective glass
-        }
-
-        Shader mobileDiffuse = Shader.Find("Mobile/Diffuse");
-        if (mobileDiffuse == null) mobileDiffuse = standard; // Fallback to what we have
-
-        lampMat = new Material(mobileDiffuse);
-        lampMat.color = Color.black;
-        
-        Shader unlitColor = Shader.Find("Unlit/Color");
-        if (unlitColor == null) unlitColor = mobileDiffuse;
-        
-        lampEmissive = new Material(unlitColor);
-        lampEmissive.color = new Color(1f, 0.4f, 1f); 
+        GameObject lightR = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        lightR.transform.SetParent(playerCar);
+        lightR.transform.localPosition = new Vector3(0.7f, 0.5f, 2.45f);
+        lightR.transform.localScale = new Vector3(0.4f, 0.2f, 0.1f);
+        lightR.GetComponent<Renderer>().material = lampEmissive;
     }
 
-    Material CreateSecureMaterial(Shader s, string texPath, string name) {
-        Material m = new Material(s);
-        Texture2D tex = Resources.Load<Texture2D>(texPath);
-        if (tex != null) m.mainTexture = tex;
-        else LogAndCopy("MISSING ASSET: " + name + " texture at " + texPath);
-        return m;
-    }
-
-    void LogAndCopy(string msg) {
-        errorMessage = msg;
-        GUIUtility.systemCopyBuffer = msg;
-        Debug.LogWarning(msg);
+    void CreateWheel(Vector3 pos) {
+        GameObject w = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        w.transform.SetParent(playerCar);
+        w.transform.localPosition = pos;
+        w.transform.localRotation = Quaternion.Euler(0, 0, 90);
+        w.transform.localScale = new Vector3(0.8f, 0.2f, 0.8f);
+        w.GetComponent<Renderer>().material = lampMat; // Black rubber look
     }
 
     void Update() {
@@ -172,58 +161,39 @@ public class SceneSetup : MonoBehaviour
         if (playerCar == null) return;
 
         float fps = 1.0f / Time.unscaledDeltaTime;
-        diagnostics = string.Format("FPS: {0:F0} | Segs: {1} | Mem: {2}MB", fps, activeSegments.Count, System.GC.GetTotalMemory(false) / 1024 / 1024);
+        diagnostics = string.Format("FPS: {0:F0} | Segs: {1}", fps, activeSegments.Count);
 
-        // Move Car Forward
-        currentSpeed = Mathf.Lerp(currentSpeed, 40f, Time.deltaTime * 0.5f); // Accelerate to 40
+        // --- Controls Logic ---
+        float inputSteer = Input.GetAxis("Horizontal");
+        if (btnLeft != null && btnLeft.isPressed) inputSteer = -1f;
+        if (btnRight != null && btnRight.isPressed) inputSteer = 1f;
+
+        float targetSpeed = 0f; // Friction stops car
+        if (btnGas != null && btnGas.isPressed) targetSpeed = 80f; // Fast
+        else if (btnBrake != null && btnBrake.isPressed) targetSpeed = 0f; // Stop
+        else targetSpeed = 15f; // Idle roll
+
+        // Smooth Physics-ish movement
+        currentSpeed = Mathf.Lerp(currentSpeed, targetSpeed, Time.deltaTime * 0.5f);
+        
+        // Update Audio
+        if (audioSys != null) {
+            audioSys.currentSpeed = currentSpeed;
+            audioSys.maxSpeed = 80f;
+        }
+
         playerCar.Translate(Vector3.forward * currentSpeed * Time.deltaTime);
         
-        // Move Car Sideways
         Vector3 targetLanePos = playerCar.position;
-        targetLanePos.x = Mathf.Clamp(targetLanePos.x + (Input.GetAxis("Horizontal") * 20f * Time.deltaTime), -8, 8); 
+        targetLanePos.x = Mathf.Clamp(targetLanePos.x + (inputSteer * 20f * Time.deltaTime), -8, 8); 
         playerCar.position = targetLanePos;
         
-        mainCamera.position = playerCar.position + new Vector3(0, 3.5f, -8f);
-        mainCamera.LookAt(playerCar.position + Vector3.up * 1.5f);
+        // Camera Lag
+        Vector3 camTarget = playerCar.position + new Vector3(0, 4.0f, -9f);
+        mainCamera.position = Vector3.Lerp(mainCamera.position, camTarget, Time.deltaTime * 5f);
+        mainCamera.LookAt(playerCar.position + Vector3.up * 1.0f);
 
         if ((spawnZ - playerCar.position.z) < (initialSegments * segmentLength)) SpawnWorldSegment();
-    }
-
-    void SpawnWorldSegment() {
-        GameObject root = new GameObject("Segment_" + spawnZ);
-        root.transform.SetParent(environmentRoot);
-        activeSegments.Add(root);
-        GameObject road = GameObject.CreatePrimitive(PrimitiveType.Plane);
-        road.transform.SetParent(root.transform);
-        road.transform.localScale = new Vector3(3f, 1, 10.1f);
-        road.transform.position = new Vector3(0, 0, spawnZ);
-        road.GetComponent<Renderer>().material = roadMat;
-        CreateBuilding(new Vector3(-45, 0, spawnZ), root.transform);
-        CreateBuilding(new Vector3(45, 0, spawnZ), root.transform);
-        if (activeSegments.Count > 25) {
-            GameObject old = activeSegments[0]; activeSegments.RemoveAt(0); Destroy(old);
-        }
-        spawnZ += segmentLength;
-    }
-
-    void CreateBuilding(Vector3 pos, Transform parent) {
-        float h = 100f + Random.value * 200f;
-        GameObject b = GameObject.CreatePrimitive(PrimitiveType.Cube);
-        b.transform.SetParent(parent);
-        b.transform.position = pos + new Vector3(0, h/2, 0);
-        b.transform.localScale = new Vector3(35f, h, 35f);
-        b.GetComponent<Renderer>().material = buildingMat; 
-    }
-
-    void CreatePlayerCar() {
-        playerCar = new GameObject("PlayerCar").transform;
-        playerCar.position = new Vector3(0, 0.5f, 0);
-        
-        // Add Splash Effect
-        playerCar.gameObject.AddComponent<CarSplashEffect>();
-
-        GameObject body = GameObject.CreatePrimitive(PrimitiveType.Cube);
-        body.transform.SetParent(playerCar); body.transform.localScale = new Vector3(2.2f, 0.8f, 5.0f); body.GetComponent<Renderer>().material = carBodyMat;
     }
 
     void OnGUI() {
