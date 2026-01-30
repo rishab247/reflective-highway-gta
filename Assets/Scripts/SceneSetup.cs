@@ -75,17 +75,53 @@ public class SceneSetup : MonoBehaviour
     }
 
     void PrepareMaterials() {
+        // Use Standard shader for PBR effects (Normals, Reflections)
+        Shader standard = Shader.Find("Standard");
+        if (standard == null) standard = Shader.Find("Mobile/Bumped Specular"); 
         Shader mobileDiffuse = Shader.Find("Mobile/Diffuse");
-        if (mobileDiffuse == null) mobileDiffuse = Shader.Find("Diffuse");
         Shader unlitColor = Shader.Find("Unlit/Color");
 
-        roadMat = CreateSecureMaterial(mobileDiffuse, "Textures/WetAsphalt_Albedo", "Road");
-        buildingMat = CreateSecureMaterial(mobileDiffuse, "Textures/BuildingColor", "Building");
+        // Load Road Material with PBR Maps
+        roadMat = new Material(standard);
+        roadMat.name = "HighwayMat_Runtime";
+        
+        Texture2D roadTex = Resources.Load<Texture2D>("Textures/HighwayTex"); 
+        if (roadTex == null) roadTex = Resources.Load<Texture2D>("Textures/WetAsphalt_Albedo");
+        if (roadTex != null) roadMat.mainTexture = roadTex;
+
+        Texture2D roadNormal = Resources.Load<Texture2D>("Textures/HighwayNormal");
+        if (roadNormal != null) {
+            roadMat.SetTexture("_BumpMap", roadNormal);
+            roadMat.EnableKeyword("_NORMALMAP");
+        }
+
+        Texture2D roadMask = Resources.Load<Texture2D>("Textures/HighwayMask");
+        if (roadMask != null) {
+            roadMat.SetTexture("_MetallicGlossMap", roadMask);
+            roadMat.SetFloat("_Smoothness", 1.0f); 
+            roadMat.EnableKeyword("_METALLICGLOSSMAP");
+        } else {
+            roadMat.SetFloat("_Glossiness", 0.85f);
+            roadMat.SetFloat("_Metallic", 0.0f);
+        }
+
+        // Building Material
+        buildingMat = new Material(standard);
+        Texture2D buildTex = Resources.Load<Texture2D>("Textures/BuildingColor");
+        if (buildTex != null) buildingMat.mainTexture = buildTex;
+        buildingMat.SetFloat("_Glossiness", 0.6f); // Reflective windows
+        buildingMat.SetFloat("_Metallic", 0.2f);
         buildingMat.color = new Color(0.6f, 0.6f, 0.7f);
-        carBodyMat = new Material(mobileDiffuse);
+
+        carBodyMat = new Material(standard);
         carBodyMat.color = new Color(0.5f, 0.5f, 0.6f); 
-        carGlassMat = new Material(mobileDiffuse);
+        carBodyMat.SetFloat("_Glossiness", 0.8f);
+        carBodyMat.SetFloat("_Metallic", 0.6f);
+
+        carGlassMat = new Material(standard);
         carGlassMat.color = new Color(0.1f, 0.2f, 0.3f);
+        carGlassMat.SetFloat("_Glossiness", 0.95f); // Very reflective glass
+
         lampMat = new Material(mobileDiffuse);
         lampMat.color = Color.black;
         lampEmissive = new Material(unlitColor);
@@ -152,6 +188,10 @@ public class SceneSetup : MonoBehaviour
     void CreatePlayerCar() {
         playerCar = new GameObject("PlayerCar").transform;
         playerCar.position = new Vector3(0, 0.5f, 0);
+        
+        // Add Splash Effect
+        playerCar.gameObject.AddComponent<CarSplashEffect>();
+
         GameObject body = GameObject.CreatePrimitive(PrimitiveType.Cube);
         body.transform.SetParent(playerCar); body.transform.localScale = new Vector3(2.2f, 0.8f, 5.0f); body.GetComponent<Renderer>().material = carBodyMat;
     }
