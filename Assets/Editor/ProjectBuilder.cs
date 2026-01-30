@@ -14,7 +14,7 @@ public class ProjectBuilder
 
         // 0. Setup Post Processing
         SetupPostProcessing.ApplyPostProcessing();
-        UpdateHighwayMaterial.ApplyUpdates();
+        UpdateHighwayMaterial.UpdateMaterial();
 
         // 1. Create a scene
         var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
